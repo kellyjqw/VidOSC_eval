@@ -24,7 +24,7 @@ class FrameCls(pl.LightningModule):
         super().__init__()
         self.args = args
         self.infer_ordering = False  # use causual ordering constraint during inference
-        self.vocab, self.sc_list, _ = build_vocab()
+        self.vocab, self.sc_list, _ = build_vocab(args)
 
         self.category_num = len(self.vocab) - 1
         args.vocab_size = 3 * self.category_num + 1

@@ -13,11 +13,11 @@ from torch.utils.data import Dataset
 from data_scripts.read_ann import derive_label
 from argparse import Namespace
 
-def build_vocab():
+def build_vocab(args):
     df = pd.read_csv(os.path.join("data_files", 'howtochange_eval.csv'))
     df['verb'] = df['osc'].apply(lambda x: x.split('_')[0])
-    # if 'all' not in args.sc_list:
-    #     df = df[df['verb'].isin(args.sc_list)]
+    if 'all' not in args.sc_list:
+        df = df[df['verb'].isin(args.sc_list)]
     vocab = {'background': 0}
     key = 'verb'
     for i, k in enumerate(df[key].unique()):
