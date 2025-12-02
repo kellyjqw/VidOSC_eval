@@ -200,8 +200,8 @@ torch.set_printoptions(threshold=torch.inf, precision=2, sci_mode=False)
 
 with torch.no_grad():
 
-    # for batch in tqdm.tqdm(test_dataset):
-    for batch in test_dataset:
+    for batch in tqdm.tqdm(test_dataset):
+    # for batch in test_dataset:
         feat, label, osc, is_novel, video_id, video_name = batch
         
         sc_name = osc.split("_")[0]
@@ -214,10 +214,10 @@ with torch.no_grad():
         pred_4 = st_prob.argmax(dim=-1)  # (T,)
         gt_4 = label.view(-1).long()
 
-        print(f"{video_name=}, {osc=}, {is_novel=}")
-        # print(f"{st_prob=}")
-        print(f"{pred_4=}")
-        print(f"{gt_4=}")
+        # print(f"{video_name=}, {osc=}, {is_novel=}")
+        # # print(f"{st_prob=}")
+        # print(f"{pred_4=}")
+        # print(f"{gt_4=}")
 
         # print(prob)
 
@@ -232,9 +232,9 @@ with torch.no_grad():
         E.record_framediff(pred_4, gt_4, is_novel)
 
         # break
-        # i+= 1
-        # if i == 5:
-        #     E.save_result()
+        i+= 1
+        if i % 300 == 0:
+            E.save_result()
         #     break
 E.save_result()
 print(f"num samples: {i}")
