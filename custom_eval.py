@@ -70,7 +70,9 @@ class Eval():
             'iou': {'known': [], 'novel': []},   # only for videos with non-empty end_state intervals
             'total_intersection': {'known': [], 'novel': []},   # to be aggregated over all videos
             'total_union': {'known': [], 'novel': []},   # to be aggregated over all videos
-            'accuracy': {'known': [], 'novel': []},
+            'accuracy_2': {'known': [], 'novel': []},
+            'accuracy_all': {'known': [], 'novel': []},
+
             'recall': {'known': [], 'novel': []},
             'precision': {'known': [], 'novel': []},
             # 'binary_f1': {'known': [], 'novel': []},
@@ -91,7 +93,7 @@ class Eval():
         return out
 
     def record_bin_metrics(self, pred_bin, gt_bin, is_novel, eps=1e-08):
-        N = label.numel()
+        N = gt_bin.numel()
 
         tp = ((pred_bin == 1) & (gt_bin == 1)).sum().float()
         fp = ((pred_bin == 1) & (gt_bin == 0)).sum().float()
@@ -106,7 +108,7 @@ class Eval():
         self.end_state_metrics["precision"][k].append(precision_pos.item())
         self.end_state_metrics["recall"][k].append(recall_pos.item())
         # self.end_state_metrics["binary_f1"][k].append(f1_pos.item())
-        self.end_state_metrics["accuracy"][k].append(acc.item())
+        self.end_state_metrics["accuracy_2"][k].append(acc.item())
     
     def record_tern_metrics(self, pred, gt, is_novel):
         f1 = self.tern_f1(pred, gt)
@@ -115,6 +117,18 @@ class Eval():
         self.end_state_metrics["f1_1"][k].append(f1[1].item())
         self.end_state_metrics["f1_2"][k].append(f1[2].item())
         self.end_state_metrics["f1_all"][k].append(f1.mean().item())
+
+        accuracy = (pred == gt).mean()
+        self.end_state_metrics["accuracy_all"][k].append(accuracy.item())
+
+
+    # def record_accuracy(self, pred, gt, is_novel):
+    #     """
+    #     Record framewise accuracy for predictions compared to ground truth.
+    #     """
+    #     acc = (pred == gt).float().mean().item()
+    #     k = "novel" if is_novel else "known"
+    #     self.end_state_metrics["accuracy_all"][k].append(acc)
 
 
     def record_IoU(self, pred, gt, is_novel):
@@ -195,8 +209,8 @@ with torch.no_grad():
         gt_category_id = vocab[sc_name]
         st_prob = prob[:, [0, 3 * gt_category_id - 2, 3 * gt_category_id - 1, 3 * gt_category_id]]
 
-        pred_4 = st_prob.argmax(dim=-1)  # (T,)
-        gt_4 = label
+        pred_4 = st_prob.argmax(dim=-1).cpu().numpy().astype(int)  # (T,)
+        gt_4 = label.view(-1).cpu().numpy().astype(int)
 
         print(f"{video_name=}, {osc=}, {is_novel=}")
         # print(f"{st_prob=}")
@@ -206,9 +220,9 @@ with torch.no_grad():
         # print(prob)
 
         pred_bin = E.bin(pred_4)
-        gt_bin = E.bin(label)
+        gt_bin = E.bin(gt_4)
         pred_3 = E.tern(pred_4)
-        gt_3 = E.tern(label)
+        gt_3 = E.tern(gt_4)
         
         E.record_bin_metrics(pred_bin, gt_bin, is_novel)
         E.record_tern_metrics(pred_3, gt_3, is_novel)
