@@ -90,10 +90,8 @@ class Eval():
         out[x == 3] = 2
         return out
 
-    def record_bin_metrics(self, pred, gt, is_novel, eps=1e-08):
+    def record_bin_metrics(self, pred_bin, gt_bin, is_novel, eps=1e-08):
         N = label.numel()
-        pred_bin = bin(pred)
-        gt_bin = bin(gt)
 
         tp = ((pred_bin == 1) & (gt_bin == 1)).sum().float()
         fp = ((pred_bin == 1) & (gt_bin == 0)).sum().float()
@@ -183,7 +181,7 @@ E = Eval(end_label=3, out_dir="vidOSC_results")
 i = 0
 with torch.no_grad():
 
-    for batch in tqdm(test_dataset):
+    for batch in tqdm.tqdm(test_dataset):
         feat, label, osc, is_novel = batch
         sc_name = osc.split("_")[0]
         pred = model(feat)
@@ -192,13 +190,16 @@ with torch.no_grad():
         st_prob = prob[:, [0, 3 * gt_category_id - 2, 3 * gt_category_id - 1, 3 * gt_category_id]]
 
         pred_4 = st_prob.argmax(dim=-1)  # (T,)
-        pred = E.tern(pred_4)
-        gt = E.tern(label)
+        gt_4 = label
+        pred_bin = E.bin(pred_4)
+        gt_bin = E.bin(label)
+        pred_3 = E.tern(pred_4)
+        gt_3 = E.tern(label)
         
-        E.record_bin_metrics(pred, gt, is_novel)
-        E.record_tern_metrics(pred, gt, is_novel)
-        E.record_IoU(pred, gt, is_novel)
-        E.record_(pred, gt, is_novel)
+        E.record_bin_metrics(pred_bin, gt_bin, is_novel)
+        E.record_tern_metrics(pred_3, gt_3, is_novel)
+        E.record_IoU(pred_4, gt_4, is_novel)
+        E.record_(pred_4, gt_4, is_novel)
 
 
         i+= 1
