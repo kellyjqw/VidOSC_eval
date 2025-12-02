@@ -1,0 +1,11 @@
+first_frame_diff (seconds)	distance (in seconds) between first predicted end_state and start of the first ground truth end_state interval
+iou	(%)                     average of each video's end state IoU. Only included those with a nonempty ground truth end_state interval
+accuracy_2 (%)              accuracy of end_state label
+accuracy_all (%) 	        accuracy of all three labels
+recall (%)                  recall of end_state prediction
+precision (%)               precision of end_state prediction
+f1_0 	                    f1 of label 0 (background) prediction
+f1_1	                    f1 of label 1 (in_progress) prediction
+f1_2	                    f1 of label 2 (end_state) prediction
+f1_all	                    average of the above three f1 scores
+total_iou (%)               end_state intersection across all videos in the test set / union across all videos in the test set
