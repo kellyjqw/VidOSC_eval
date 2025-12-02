@@ -1,6 +1,6 @@
 first_frame_diff (seconds)	distance (in seconds) between first predicted end_state and start of the first ground truth end_state interval
 iou	(%)                     average of each video's end state IoU. Only included those with a nonempty ground truth end_state interval
-accuracy_2 (%)              accuracy of end_state label
+accuracy_2 (%)              accuracy of binary (end_state, not end_state) label
 accuracy_all (%) 	        accuracy of all three labels
 recall (%)                  recall of end_state prediction
 precision (%)               precision of end_state prediction
