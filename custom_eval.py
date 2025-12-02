@@ -1,20 +1,34 @@
 import os
+
+import tqdm
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-import numpy as np
-from torchmetrics.classification import MulticlassPrecision, MulticlassF1Score
-
+# import pytorch_lightning as pl
+# import numpy as np
 from data_scripts.evaluator import StatePrec1
 from argparse import Namespace
 from dataset import HowToChangeFeatDataset
 
 from task import FrameCls
-vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 'chopping': 6, 'crushing': 7, 
-                        'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 
-                        'browning': 16, 'grilling': 17, 'shredding': 18, 'whipping': 19, 'zesting': 20}
-sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 'melting', 'mincing', 'slicing', 
-                        'grating', 'sauteing', 'frying', 'blending', 'coating', 'browning', 'grilling', 'shredding', 'whipping', 'zesting']
+import pickle
+import json
+
+from torchmetrics.classification import (
+    BinaryPrecision,
+    BinaryRecall,
+    BinaryF1Score,
+    MulticlassPrecision,
+    MulticlassRecall,
+    MulticlassF1Score,
+)
+
+vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 
+        'chopping': 6, 'crushing': 7, 'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 
+        'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 'browning': 16, 'grilling': 17, 
+        'shredding': 18, 'whipping': 19, 'zesting': 20}
+sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 
+            'melting', 'mincing', 'slicing','grating', 'sauteing', 'frying', 'blending', 'coating', 
+            'browning', 'grilling', 'shredding', 'whipping', 'zesting']
 category_num = len(vocab) - 1
 vocab_size = 3 * category_num + 1
 input_dim = 768 
@@ -43,6 +57,118 @@ args = Namespace(
     det=0
 )
 
+class Eval():
+    def __init__(self, end_label, out_dir) -> None:
+        os.makedirs(out_dir, exist_ok=True)
+        # self.tern_prec = MulticlassPrecision(num_classes=3, average="none")
+        # self.tern_rec = MulticlassRecall(num_classes=3, average="none")
+        self.out_dir = out_dir
+        self.tern_f1 = MulticlassF1Score(num_classes=3, average="none")
+        self.end_label = end_label
+        self.end_state_metrics = {
+            'first_frame_diff': {'known': [], 'novel': []},
+            'iou': {'known': [], 'novel': []},   # only for videos with non-empty end_state intervals
+            'total_intersection': {'known': [], 'novel': []},   # to be aggregated over all videos
+            'total_union': {'known': [], 'novel': []},   # to be aggregated over all videos
+            'accuracy': {'known': [], 'novel': []},
+            'recall': {'known': [], 'novel': []},
+            'precision': {'known': [], 'novel': []},
+            # 'binary_f1': {'known': [], 'novel': []},
+            'f1_0': {'known': [], 'novel': []},
+            'f1_1': {'known': [], 'novel': []},
+            'f1_2': {'known': [], 'novel': []},
+            'f1_all': {'known': [], 'novel': []}
+        } 
+
+    def bin(self, x):
+        return  (x == self.end_label).long() 
+
+    def tern(x: torch.Tensor) -> torch.Tensor:
+        # x in {0,1,2,3}
+        out = x.clone()
+        out[(x == 1) | (x == 2)] = 1
+        out[x == 3] = 2
+        return out
+
+    def record_bin_metrics(self, pred, gt, is_novel, eps=1e-08):
+        N = label.numel()
+        pred_bin = bin(pred)
+        gt_bin = bin(gt)
+
+        tp = ((pred_bin == 1) & (gt_bin == 1)).sum().float()
+        fp = ((pred_bin == 1) & (gt_bin == 0)).sum().float()
+        fn = ((pred_bin == 0) & (gt_bin == 1)).sum().float()
+        tn = ((pred_bin == 0) & (gt_bin == 0)).sum().float()
+
+        precision_pos = tp / (tp + fp + eps)      # positive class = 1
+        recall_pos    = tp / (tp + fn + eps)
+        f1_pos        = 2 * precision_pos * recall_pos / (precision_pos + recall_pos + eps)
+        acc           = (tp + tn) / N
+        k = "novel" if is_novel else "known"
+        self.end_state_metrics["precision"][k].append(precision_pos.item())
+        self.end_state_metrics["recall"][k].append(recall_pos.item())
+        # self.end_state_metrics["binary_f1"][k].append(f1_pos.item())
+        self.end_state_metrics["accuracy"][k].append(acc.item())
+    
+    def record_tern_metrics(self, pred, gt, is_novel):
+        f1 = self.tern_f1(pred, gt)
+        k = "novel" if is_novel else "known"
+        self.end_state_metrics["f1_0"][k].append(f1[0].item())
+        self.end_state_metrics["f1_1"][k].append(f1[1].item())
+        self.end_state_metrics["f1_2"][k].append(f1[2].item())
+        self.end_state_metrics["f1_all"][k].append(f1.mean().item())
+
+
+    def record_IoU(self, pred, gt, is_novel):
+        """
+        Compute the Intersection over Union (IoU) between predicted and ground truth end state regions.
+        Treats all indices where value == 3 as the region.
+        """
+        k = "novel" if is_novel else "known"
+
+        pred_region = (pred == self.end_label)
+        gt_region = (gt == self.end_label)
+
+        intersection = (pred_region & gt_region).sum().item()
+        union = (pred_region | gt_region).sum().item()
+
+        self.end_state_metrics["total_intersection"][k].append(intersection)
+        self.end_state_metrics["total_union"][k].append(union)
+
+        if gt_region.any(): 
+            iou = intersection / union 
+            self.end_state_metrics["iou"][k].append(iou)
+
+    def record_framediff(self, pred, gt, is_novel):  # pred, gt: (T,) tensors
+        """
+        Record the difference in the first appearing frame index of '3' class between pred and gt.
+        If '3' never occurs, use -1 as the index.
+        """
+        T = gt.numel()
+
+        pred_idx = (pred == self.end_label).nonzero(as_tuple=True)[0]
+        gt_idx = (gt == self.end_label).nonzero(as_tuple=True)[0]
+        
+        pred_first_idx = pred_idx[0].item() if len(pred_idx) > 0 else T
+        gt_first_idx = gt_idx[0].item() if len(gt_idx) > 0 else T
+
+        diff = abs(pred_first_idx - gt_first_idx)
+        k = "novel" if is_novel else "known"
+        self.end_state_metrics["first_frame_diff"][k].append(diff)
+
+    def save_result(self):
+        pkl_path = os.path.join(self.out_dir, "results.pkl")
+        json_path = os.path.join(self.out_dir, "results.json")
+
+        # Save the metrics dictionary as a pickle file
+        with open(pkl_path, "wb") as f:
+            pickle.dump(self.end_state_metrics, f)
+
+        with open(json_path, "w") as f:
+            json.dump(self.end_state_metrics, f, indent=2)
+
+
+
 def infer_state_idx(prob):
     pred_idx = torch.argmax(prob, dim=0).cpu().numpy()
     pred_idx = pred_idx[1:]
@@ -53,196 +179,31 @@ model = task.model  # this is your FeatTimeTransformer
 
 model.eval()
 test_dataset = HowToChangeFeatDataset(args)
+E = Eval(end_label=3, out_dir="vidOSC_results")
 i = 0
 with torch.no_grad():
-    for batch in test_dataset:
+
+    for batch in tqdm(test_dataset):
         feat, label, osc, is_novel = batch
         sc_name = osc.split("_")[0]
         pred = model(feat)
-
         prob = torch.softmax(pred, dim=-1)
         gt_category_id = vocab[sc_name]
         st_prob = prob[:, [0, 3 * gt_category_id - 2, 3 * gt_category_id - 1, 3 * gt_category_id]]
 
-        pred_idx = infer_state_idx(st_prob)
-        print(pred_idx)
-        label_np = label.cpu().numpy().flatten()
+        pred_4 = st_prob.argmax(dim=-1)  # (T,)
+        pred = E.tern(pred_4)
+        gt = E.tern(label)
         
-        # pred_idx excludes the first frame (frames 1 to N-1), so align with label[1:]
-        # Extract end state predictions and ground truth (class 3)
-        # pred_idx[0] corresponds to label_np[1], pred_idx[1] to label_np[2], etc.
-        pred_end_state = (pred_idx == 3).astype(int)
-        gt_end_state_full = (label_np == 3).astype(int)
-        gt_end_state = gt_end_state_full[1:]  # Align with pred_idx (exclude first frame)
+        E.record_bin_metrics(pred, gt, is_novel)
+        E.record_tern_metrics(pred, gt, is_novel)
+        E.record_IoU(pred, gt, is_novel)
+        E.record_(pred, gt, is_novel)
 
-        print(f"{pred_end_state=}")
-        print(f"{gt_end_state_full=}")
-        print(f"{gt_end_state=}")
+
         i+= 1
         if i == 3:
+            E.save_result()
             break
 
-'''
-class NewFrameCls(pl.LightningModule):
-    def __init__(self, args):
-        super().__init__()
-        self.args = args
-        self.infer_ordering = False  # use causual ordering constraint during inference
-        self.vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 'chopping': 6, 'crushing': 7, 
-                        'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 
-                        'browning': 16, 'grilling': 17, 'shredding': 18, 'whipping': 19, 'zesting': 20}
-        self.sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 'melting', 'mincing', 'slicing', 
-                        'grating', 'sauteing', 'frying', 'blending', 'coating', 'browning', 'grilling', 'shredding', 'whipping', 'zesting']
-        self.category_num = len(self.vocab) - 1
-        args.vocab_size = 3 * self.category_num + 1
-        args.input_dim = 768 * (1 + self.args.det)
-        self.model = FeatTimeTransformer(args)
-        # self.loss = nn.CrossEntropyLoss(ignore_index=-1)
-        self.eval_setting = ['known', 'novel', 'all']
-        self.metric_name_list = ['avg_f1_known', 'avg_f1_novel', 'avg_prec_known', 'avg_prec_novel']
-        
-        # Initialize metric accumulators for end state evaluation
-        self.end_state_metrics = {
-            'first_frame_diff': {'all': [], 'known': [], 'novel': []},
-            'iou': {'all': [], 'known': [], 'novel': []},
-            'accuracy': {'all': [], 'known': [], 'novel': []},
-            'recall': {'all': [], 'known': [], 'novel': []},
-            'precision': {'all': [], 'known': [], 'novel': []},
-            'f1': {'all': [], 'known': [], 'novel': []}
-        } 
-
-
-    def training_step(self, batch, batch_idx):
-        pass
-
-    def infer_state_idx(self, prob):
-        pred_idx = torch.argmax(prob, dim=0).cpu().numpy()
-        pred_idx = pred_idx[1:]
-        return pred_idx
-
-    def validation_step(self, batch, batch_idx):
-        feat, label, osc, is_novel = batch
-        osc = osc[0]
-        sc_name = osc.split('_')[0]
-
-        name = 'novel' if is_novel.item() else 'known'
-        pred = self.model(feat)
-        prob = torch.softmax(pred, dim=-1)
-        category_pred = prob[:, 1:].reshape(-1, self.category_num, 3).sum(dim=0).sum(dim=-1)
-        inferred_catgeory_id = category_pred.argmax().item() + 1
-        key = sc_name
-        gt_category_id = self.vocab[key]
-
-        # self.log('category_acc', inferred_catgeory_id == gt_category_id, on_step=False, on_epoch=True)
-        category_id = gt_category_id
-        st_prob = prob[:, [0, 3 * category_id - 2, 3 * category_id - 1, 3 * category_id]]
-
-        pred_idx = self.infer_state_idx(st_prob)
-        print(pred_idx)
-        label_np = label.cpu().numpy().flatten()
-        
-        # pred_idx excludes the first frame (frames 1 to N-1), so align with label[1:]
-        # Extract end state predictions and ground truth (class 3)
-        # pred_idx[0] corresponds to label_np[1], pred_idx[1] to label_np[2], etc.
-        pred_end_state = (pred_idx == 3).astype(int)
-        gt_end_state_full = (label_np == 3).astype(int)
-        gt_end_state = gt_end_state_full[1:]  # Align with pred_idx (exclude first frame)
-
-        print(f"{pred_end_state=}")
-        print(f"{gt_end_state_full=}")
-        print(f"{gt_end_state=}")
-
-        
-        # # Metric 1: Average difference between first predicted end state and first ground truth end state
-        # # Note: pred_idx indices need to be offset by 1 to match label_np frame indices
-        # pred_first_end_idx = np.where(pred_end_state == 1)[0]
-        # gt_first_end_idx = np.where(gt_end_state == 1)[0]
-        # gt_first_end_idx_full = np.where(gt_end_state_full == 1)[0]
-        
-        # if len(pred_first_end_idx) == 0:
-        #     pred_first_end_frame = len(label_np)  # frame after last frame
-        # else:
-        #     pred_first_end_frame = pred_first_end_idx[0] + 1  # +1 because pred_idx starts from frame 1
-        
-        # if len(gt_first_end_idx_full) == 0:
-        #     gt_first_end_frame = len(label_np)  # frame after last frame
-        # else:
-        #     gt_first_end_frame = gt_first_end_idx_full[0]
-        
-        # first_frame_diff = abs(pred_first_end_frame - gt_first_end_frame)
-        # self.end_state_metrics['first_frame_diff']['all'].append(first_frame_diff)
-        # self.end_state_metrics['first_frame_diff'][name].append(first_frame_diff)
-        
-        # # Metric 2: IoU for videos with end state interval
-        # if len(gt_first_end_idx_full) > 0:  # Only compute IoU if video has end state interval
-        #     intersection = np.logical_and(pred_end_state, gt_end_state).sum()
-        #     union = np.logical_or(pred_end_state, gt_end_state).sum()
-        #     iou = intersection / union if union > 0 else 0.0
-        #     self.end_state_metrics['iou']['all'].append(iou)
-        #     self.end_state_metrics['iou'][name].append(iou)
-        
-        # # Metric 3: Accuracy, recall, precision, and F1 of end state class
-        # # Binary classification: end state (1) vs not end state (0)
-        # # Compare pred_end_state with gt_end_state (both aligned, excluding first frame)
-        # tp = np.logical_and(pred_end_state == 1, gt_end_state == 1).sum()
-        # fp = np.logical_and(pred_end_state == 1, gt_end_state == 0).sum()
-        # fn = np.logical_and(pred_end_state == 0, gt_end_state == 1).sum()
-        # tn = np.logical_and(pred_end_state == 0, gt_end_state == 0).sum()
-        
-        # accuracy = (tp + tn) / len(pred_end_state) if len(pred_end_state) > 0 else 0.0
-        # precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        # recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        # f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-        
-        # self.end_state_metrics['accuracy']['all'].append(accuracy)
-        # self.end_state_metrics['accuracy'][name].append(accuracy)
-        # self.end_state_metrics['recall']['all'].append(recall)
-        # self.end_state_metrics['recall'][name].append(recall)
-        # self.end_state_metrics['precision']['all'].append(precision)
-        # self.end_state_metrics['precision'][name].append(precision)
-        # self.end_state_metrics['f1']['all'].append(f1)
-        # self.end_state_metrics['f1'][name].append(f1)
-
-    def on_validation_epoch_end(self):
-        # Log end state metrics
-        for metric_name in ['first_frame_diff', 'iou', 'accuracy', 'recall', 'precision', 'f1']:
-            for key in self.eval_setting:
-                if len(self.end_state_metrics[metric_name][key]) > 0:
-                    avg_value = np.mean(self.end_state_metrics[metric_name][key])
-                    self.log(f'end_state_{metric_name}_{key}', avg_value, on_step=False, on_epoch=True, prog_bar=True)
-                # Reset for next epoch
-                self.end_state_metrics[metric_name][key] = []
-        
-        for i, sc_name in enumerate(self.sc_list):
-            for key in self.eval_setting:
-                val_prec1 = self.state_prec1[sc_name][key].compute()
-                self.log(f'{sc_name}_avg_prec1_{key}', val_prec1['avg'], on_step=False, on_epoch=True, prog_bar=True)
-                self.state_prec1[sc_name][key].reset()
-
-        if len(self.sc_list) > 1:
-            avg_result = np.zeros((len(self.sc_list), 6))
-            value_name = ['avg_f1_known', 'avg_f1_novel', 'avg_prec_known', 'avg_prec_novel', 'avg_prec1_known',
-                        'avg_prec1_novel']
-            for i, sc_name in enumerate(self.sc_list):
-                value_list = [self.trainer.callback_metrics.get(f'{sc_name}_{v}').item() for v in value_name]
-                avg_result[i] = value_list
-            avg_result = avg_result.mean(axis=0)
-            for i, v in enumerate(value_name):
-                self.log(f'{v}', avg_result[i], on_step=False, on_epoch=True, prog_bar=True)
-
-        val_name = [f'{self.sc_list[0]}_avg_f1_known', f'{self.sc_list[0]}_avg_f1_novel',
-                    f'{self.sc_list[0]}_avg_prec_known', f'{self.sc_list[0]}_avg_prec_novel',
-                    f'{self.sc_list[0]}_avg_prec1_known', f'{self.sc_list[0]}_avg_prec1_novel']
-        value_list = [round(self.trainer.callback_metrics.get(v).item() * 100, 2) for v in val_name]
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.args.lr, weight_decay=self.args.wd)
-        return optimizer
-
-    def train_dataloader(self):
-        return construct_loader(self.args, "train")
-
-    def val_dataloader(self):
-        return construct_loader(self.args, "val")
-
-'''
+print(f"num samples: {i}")
