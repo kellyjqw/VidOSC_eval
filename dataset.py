@@ -34,7 +34,7 @@ class HowToChangeFeatDataset(Dataset):
         self.args = args
         self.feat_dir = "data"
         # self.vocab, self.sc_list, _ = build_vocab()
-        self.df = pd.read_csv("data/annotation/temp.csv")
+        self.df = pd.read_csv("data/annotation/test.csv")
         # print(f"HowToChange Eval: state transition = {args.sc_list} -> {len(self.df)} videos")
         self.max_seq_len = int(self.df['duration'].max())
         print(f"Max sequence length: {self.max_seq_len}")
