@@ -11,30 +11,36 @@ import pandas as pd
 import ast
 from torch.utils.data import Dataset
 from data_scripts.read_ann import derive_label
+from typing import SimpleNamespace
 
 
-def build_vocab(args):
-    df = pd.read_csv(os.path.join(args.ann_dir, 'howtochange_eval.csv'))
-    df['verb'] = df['osc'].apply(lambda x: x.split('_')[0])
-    if 'all' not in args.sc_list:
-        df = df[df['verb'].isin(args.sc_list)]
-    vocab = {'background': 0}
-    key = 'verb'
-    for i, k in enumerate(df[key].unique()):
-        vocab[k] = i + 1
-    sc_list = df['verb'].unique().tolist()
-    print(f"Vocab len: {len(vocab)}")
-    print(f"Vocab {vocab}")
-    print(f"State Transition {sc_list}")
-    return vocab, sc_list, df
+# def build_vocab(args):
+#     df = pd.read_csv(os.path.join(args.ann_dir, 'howtochange_eval.csv'))
+#     df['verb'] = df['osc'].apply(lambda x: x.split('_')[0])
+#     if 'all' not in args.sc_list:
+#         df = df[df['verb'].isin(args.sc_list)]
+#     vocab = {'background': 0}
+#     key = 'verb'
+#     for i, k in enumerate(df[key].unique()):
+#         vocab[k] = i + 1
+#     sc_list = df['verb'].unique().tolist()
+#     print(f"Vocab len: {len(vocab)}")
+#     print(f"Vocab {vocab}")
+#     print(f"State Transition {sc_list}")
+#     return vocab, sc_list, df
 
 
 class HowToChangeFeatDataset(Dataset):
     def __init__(self, args):
         self.args = args
-        self.feat_dir = args.feat_dir
-        self.vocab, _, self.df = build_vocab(args)
-        print(f"HowToChange Eval: state transition = {args.sc_list} -> {len(self.df)} videos")
+        self.feat_dir = "data/feats"
+        self.vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 'chopping': 6, 'crushing': 7, 
+                        'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 
+                        'browning': 16, 'grilling': 17, 'shredding': 18, 'whipping': 19, 'zesting': 20}
+        self.sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 'melting', 'mincing', 'slicing', 
+                        'grating', 'sauteing', 'frying', 'blending', 'coating', 'browning', 'grilling', 'shredding', 'whipping', 'zesting']
+        self.df = pd.read_csv("../test.csv")
+        # print(f"HowToChange Eval: state transition = {args.sc_list} -> {len(self.df)} videos")
         self.max_seq_len = int(self.df['duration'].max())
         print(f"Max sequence length: {self.max_seq_len}")
 
@@ -312,4 +318,43 @@ class HowToChangeFeatCLIPLabelDatasetDeprecated(HowToChangeFeatDataset):
 
     def __len__(self):
         return len(self.data_list)
+
+
+if __name__ == "__main__":
+    args = SimpleNamespace(
+        # data args
+        ann_dir='./data_files',
+        pseudolabel_dir='./videoclip_pseudolabel',
+        feat_dir='./data',
+        sc_list=self.sc_list,
+        # model args
+        transformer_heads=4,
+        transformer_layers=3,
+        transformer_dim=512,
+        transformer_dropout=0.1,
+        # training args
+        gpus=1,
+        lr=5e-4,
+        wd=0.0001,
+        batch_size=64,
+        num_workers=8,
+        n_epochs=50,
+        log_dir='./logs',
+        log_name='debug',
+        ckpt='',
+        use_gt_action=False,
+        det=0
+    )
+    test_dataset = HowToChangeFeatDataset(args)
+    i = 0
+    for batch in test_dataset:
+        feat, label, osc, is_novel = batch
+        print(label)
+        print(osc)
+        print(is_novel)
+        i+= 1
+        if i == 3:
+            break
+
+    
 
