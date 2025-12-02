@@ -3,13 +3,10 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 import numpy as np
-import lookforthechange
 from torchmetrics.classification import MulticlassPrecision, MulticlassF1Score
 
-from loader import construct_loader
-from model import FeatTimeTransformer
 from data_scripts.evaluator import StatePrec1
-from typing import SimpleNamespace
+from argparse import Namespace
 from dataset import HowToChangeFeatDataset
 
 from task import FrameCls
@@ -21,7 +18,7 @@ sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping',
 category_num = len(vocab) - 1
 vocab_size = 3 * category_num + 1
 input_dim = 768 
-args = SimpleNamespace(
+args = Namespace(
     # data args
     ann_dir='./data_files',
     pseudolabel_dir='./videoclip_pseudolabel',
