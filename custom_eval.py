@@ -37,7 +37,7 @@ args = Namespace(
     ann_dir='./data_files',
     pseudolabel_dir='./videoclip_pseudolabel',
     feat_dir='./data',
-    sc_list=sc_list,
+    sc_list="all",
     # model args
     transformer_heads=4,
     transformer_layers=3,
@@ -83,7 +83,7 @@ class Eval():
     def bin(self, x):
         return  (x == self.end_label).long() 
 
-    def tern(x: torch.Tensor) -> torch.Tensor:
+    def tern(self, x: torch.Tensor) -> torch.Tensor:
         # x in {0,1,2,3}
         out = x.clone()
         out[(x == 1) | (x == 2)] = 1
@@ -174,16 +174,22 @@ def infer_state_idx(prob):
 # recommended simple way
 task = FrameCls.load_from_checkpoint(checkpoint_path="checkpoint/multitask.ckpt", args=args)
 model = task.model  # this is your FeatTimeTransformer
+vocab = task.vocab
 
 model.eval()
 test_dataset = HowToChangeFeatDataset(args)
 E = Eval(end_label=3, out_dir="vidOSC_results")
 i = 0
+torch.set_printoptions(threshold=torch.inf, precision=2, sci_mode=False) 
+
 with torch.no_grad():
 
-    for batch in tqdm.tqdm(test_dataset):
-        feat, label, osc, is_novel = batch
+    # for batch in tqdm.tqdm(test_dataset):
+    for batch in test_dataset:
+        feat, label, osc, is_novel, video_id, video_name = batch
+        
         sc_name = osc.split("_")[0]
+        feat = feat.unsqueeze(0)
         pred = model(feat)
         prob = torch.softmax(pred, dim=-1)
         gt_category_id = vocab[sc_name]
@@ -191,6 +197,14 @@ with torch.no_grad():
 
         pred_4 = st_prob.argmax(dim=-1)  # (T,)
         gt_4 = label
+
+        print(f"{video_name=}, {osc=}, {is_novel=}")
+        # print(f"{st_prob=}")
+        print(f"{pred_4=}")
+        print(f"{gt_4=}")
+
+        # print(prob)
+
         pred_bin = E.bin(pred_4)
         gt_bin = E.bin(label)
         pred_3 = E.tern(pred_4)
@@ -199,12 +213,12 @@ with torch.no_grad():
         E.record_bin_metrics(pred_bin, gt_bin, is_novel)
         E.record_tern_metrics(pred_3, gt_3, is_novel)
         E.record_IoU(pred_4, gt_4, is_novel)
-        E.record_(pred_4, gt_4, is_novel)
+        E.record_framediff(pred_4, gt_4, is_novel)
 
-
-        i+= 1
-        if i == 3:
-            E.save_result()
-            break
-
+        # break
+        # i+= 1
+        # if i == 5:
+        #     E.save_result()
+        #     break
+E.save_result()
 print(f"num samples: {i}")

@@ -13,7 +13,7 @@ import numpy as np
 # import lookforthechange
 from torchmetrics.classification import MulticlassPrecision, MulticlassF1Score
 
-# from dataset import build_vocab
+from dataset import build_vocab
 from loader import construct_loader
 from model import FeatTimeTransformer
 from data_scripts.evaluator import StatePrec1
@@ -24,11 +24,8 @@ class FrameCls(pl.LightningModule):
         super().__init__()
         self.args = args
         self.infer_ordering = False  # use causual ordering constraint during inference
-        self.vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 'chopping': 6, 'crushing': 7, 
-                        'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 
-                        'browning': 16, 'grilling': 17, 'shredding': 18, 'whipping': 19, 'zesting': 20}
-        self.sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 'melting', 'mincing', 'slicing', 
-                        'grating', 'sauteing', 'frying', 'blending', 'coating', 'browning', 'grilling', 'shredding', 'whipping', 'zesting']
+        self.vocab, self.sc_list, _ = build_vocab()
+
         self.category_num = len(self.vocab) - 1
         args.vocab_size = 3 * self.category_num + 1
         args.input_dim = 768 * (1 + self.args.det)

@@ -13,32 +13,28 @@ from torch.utils.data import Dataset
 from data_scripts.read_ann import derive_label
 from argparse import Namespace
 
-# def build_vocab(args):
-#     df = pd.read_csv(os.path.join(args.ann_dir, 'howtochange_eval.csv'))
-#     df['verb'] = df['osc'].apply(lambda x: x.split('_')[0])
-#     if 'all' not in args.sc_list:
-#         df = df[df['verb'].isin(args.sc_list)]
-#     vocab = {'background': 0}
-#     key = 'verb'
-#     for i, k in enumerate(df[key].unique()):
-#         vocab[k] = i + 1
-#     sc_list = df['verb'].unique().tolist()
-#     print(f"Vocab len: {len(vocab)}")
-#     print(f"Vocab {vocab}")
-#     print(f"State Transition {sc_list}")
-#     return vocab, sc_list, df
+def build_vocab():
+    df = pd.read_csv(os.path.join("data_files", 'howtochange_eval.csv'))
+    df['verb'] = df['osc'].apply(lambda x: x.split('_')[0])
+    # if 'all' not in args.sc_list:
+    #     df = df[df['verb'].isin(args.sc_list)]
+    vocab = {'background': 0}
+    key = 'verb'
+    for i, k in enumerate(df[key].unique()):
+        vocab[k] = i + 1
+    sc_list = df['verb'].unique().tolist()
+    print(f"Vocab len: {len(vocab)}")
+    print(f"Vocab {vocab}")
+    print(f"State Transition {sc_list}")
+    return vocab, sc_list, df
 
 
 class HowToChangeFeatDataset(Dataset):
     def __init__(self, args):
         self.args = args
         self.feat_dir = "data"
-        self.vocab = {'background': 0, 'rolling': 1, 'squeezing': 2, 'mashing': 3, 'roasting': 4, 'peeling': 5, 'chopping': 6, 'crushing': 7, 
-                        'melting': 8, 'mincing': 9, 'slicing': 10, 'grating': 11, 'sauteing': 12, 'frying': 13, 'blending': 14, 'coating': 15, 
-                        'browning': 16, 'grilling': 17, 'shredding': 18, 'whipping': 19, 'zesting': 20}
-        self.sc_list = ['rolling', 'squeezing', 'mashing', 'roasting', 'peeling', 'chopping', 'crushing', 'melting', 'mincing', 'slicing', 
-                        'grating', 'sauteing', 'frying', 'blending', 'coating', 'browning', 'grilling', 'shredding', 'whipping', 'zesting']
-        self.df = pd.read_csv("data/annotation/test.csv")
+        # self.vocab, self.sc_list, _ = build_vocab()
+        self.df = pd.read_csv("data/annotation/temp.csv")
         # print(f"HowToChange Eval: state transition = {args.sc_list} -> {len(self.df)} videos")
         self.max_seq_len = int(self.df['duration'].max())
         print(f"Max sequence length: {self.max_seq_len}")
@@ -82,7 +78,7 @@ class HowToChangeFeatDataset(Dataset):
         row = self.df.iloc[index]
         feat = self.load_feat(row)
         label = torch.from_numpy(derive_label(row, feat.shape[0]))
-        return feat, label, row['osc'], row['is_novel_osc']
+        return feat, label, row['osc'], row['is_novel_osc'], row['video_id'], row['video_name']
 
     def __len__(self):
         return len(self.df)
