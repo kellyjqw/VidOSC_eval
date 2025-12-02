@@ -93,7 +93,7 @@ class Eval():
         return out
 
     def record_bin_metrics(self, pred_bin, gt_bin, is_novel, eps=1e-08):
-        N = gt_bin.numel()
+        N = label.numel()
 
         tp = ((pred_bin == 1) & (gt_bin == 1)).sum().float()
         fp = ((pred_bin == 1) & (gt_bin == 0)).sum().float()
@@ -118,8 +118,10 @@ class Eval():
         self.end_state_metrics["f1_2"][k].append(f1[2].item())
         self.end_state_metrics["f1_all"][k].append(f1.mean().item())
 
-        accuracy = (pred == gt).mean()
-        self.end_state_metrics["accuracy_all"][k].append(accuracy.item())
+        num_correct = (pred == gt).sum().item()
+        num_total = gt.numel()
+        accuracy = num_correct / num_total
+        self.end_state_metrics["accuracy_all"][k].append(accuracy)
 
 
     # def record_accuracy(self, pred, gt, is_novel):
@@ -209,8 +211,8 @@ with torch.no_grad():
         gt_category_id = vocab[sc_name]
         st_prob = prob[:, [0, 3 * gt_category_id - 2, 3 * gt_category_id - 1, 3 * gt_category_id]]
 
-        pred_4 = st_prob.argmax(dim=-1).cpu().numpy().astype(int)  # (T,)
-        gt_4 = label.view(-1).cpu().numpy().astype(int)
+        pred_4 = st_prob.argmax(dim=-1)  # (T,)
+        gt_4 = label.view(-1).long()
 
         print(f"{video_name=}, {osc=}, {is_novel=}")
         # print(f"{st_prob=}")
